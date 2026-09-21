@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-
 import threading
+import queue
 import time
 
 from hoppers import (
@@ -22,32 +22,30 @@ from hoppers import (
 from minimax_agent import MinimaxAgent
 
 
-class HoppersGUI:
+class HoppersApp:
 
-    CELL_SIZE = 55
-    MARGIN = 35
+    CELL = 54
+    MARGIN = 34
 
-    BOARD_PIXELS = (
-        SIZE * CELL_SIZE
-        + MARGIN * 2
-    )
+    GREEN = "#2E8B57"
+    PURPLE = "#7B2CBF"
 
+    BG = "#171A21"
+    CARD = "#232730"
+    BOARD_BG = "#F4F1EA"
+
+    TEXT = "#F5F5F5"
+    MUTED = "#A9AFBA"
+
+    BLUE = "#38A9D1"
+    GOLD = "#E8B647"
 
     def __init__(self, root):
         self.root = root
-
-        self.root.title(
-            "Hoppers - Inteligencia Artificial"
-        )
-
-        self.root.geometry(
-            "1050x720"
-        )
-
-        self.root.minsize(
-            950,
-            680
-        )
+        self.root.title("Hoppers")
+        self.root.geometry("1050x820")
+        self.root.minsize(980, 760)
+        self.root.configure(bg=self.BG)
 
         self.state = initial_state()
 
@@ -55,95 +53,401 @@ class HoppersGUI:
         self.selected_actions = []
 
         self.agent_thinking = False
-        self.game_token = 0
+        self.agent_queue = queue.Queue()
 
-        self.mode_var = tk.StringVar(
-            value="Humano vs Agente"
+        self.game_id = 0
+
+        self.mode = None
+        self.depth = 2
+
+        self.history = []
+
+        self.main_frame = None
+        self.canvas = None
+
+        self.show_start_screen()
+
+
+
+
+    def show_start_screen(self):
+        if self.main_frame is not None:
+            self.main_frame.destroy()
+
+        self.main_frame = tk.Frame(
+            self.root,
+            bg=self.BG
+        )
+
+        self.main_frame.pack(
+            fill="both",
+            expand=True
+        )
+
+        center = tk.Frame(
+            self.main_frame,
+            bg=self.BG
+        )
+
+        center.place(
+            relx=0.5,
+            rely=0.48,
+            anchor="center"
+        )
+
+        tk.Label(
+            center,
+            text="HOPPERS",
+            font=("Segoe UI", 38, "bold"),
+            fg="white",
+            bg=self.BG
+        ).pack()
+
+        tk.Label(
+            center,
+            text="Proyecto de Inteligencia Artificial",
+            font=("Segoe UI", 12),
+            fg=self.MUTED,
+            bg=self.BG
+        ).pack(
+            pady=(0, 30)
+        )
+
+        tk.Label(
+            center,
+            text="Selecciona un modo de juego",
+            font=("Segoe UI", 14, "bold"),
+            fg="white",
+            bg=self.BG
+        ).pack(
+            pady=(0, 15)
+        )
+
+        modes = [
+            ("Humano vs Agente", "Tú juegas primero"),
+            ("Agente vs Humano", "El agente juega primero"),
+            ("Agente vs Agente", "Observa a los dos agentes"),
+            ("Humano vs Humano", "Dos jugadores manuales")
+        ]
+
+        for name, description in modes:
+            button = tk.Button(
+                center,
+                text=f"{name}\n{description}",
+                command=lambda m=name: self.select_mode(m),
+                width=32,
+                height=3,
+                font=("Segoe UI", 11, "bold"),
+                bg=self.CARD,
+                fg="white",
+                activebackground="#313642",
+                activeforeground="white",
+                relief="flat",
+                cursor="hand2"
+            )
+
+            button.pack(
+                pady=6
+            )
+
+        depth_frame = tk.Frame(
+            center,
+            bg=self.BG
+        )
+
+        depth_frame.pack(
+            pady=(25, 0)
+        )
+
+        tk.Label(
+            depth_frame,
+            text="Profundidad del agente:",
+            font=("Segoe UI", 10),
+            fg=self.MUTED,
+            bg=self.BG
+        ).pack(
+            side="left",
+            padx=(0, 10)
         )
 
         self.depth_var = tk.IntVar(
             value=2
         )
 
-        self.status_var = tk.StringVar()
-        self.objective_var = tk.StringVar()
-
-        self.selected_var = tk.StringVar(
-            value="Ninguna ficha seleccionada"
+        depth_box = ttk.Combobox(
+            depth_frame,
+            textvariable=self.depth_var,
+            state="readonly",
+            values=(1, 2, 3, 4, 5),
+            width=5
         )
 
-        self.create_interface()
+        depth_box.pack(
+            side="left"
+        )
 
-        self.update_interface()
+
+    def select_mode(self, mode):
+        self.mode = mode
+        self.depth = int(
+            self.depth_var.get()
+        )
+
+        self.start_game()
+
+
+
+
+    def start_game(self):
+        self.game_id += 1
+
+        self.state = initial_state()
+
+        self.selected_piece = None
+        self.selected_actions = []
+
+        self.agent_thinking = False
+
+        self.history = []
+
+        self.create_game_screen()
+        self.update_game()
 
         self.root.after(
-            300,
+            400,
             self.check_agent_turn
         )
 
 
-    def create_interface(self):
-        style = ttk.Style()
+    def create_game_screen(self):
+        self.main_frame.destroy()
 
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-
-        main_frame = ttk.Frame(
+        self.main_frame = tk.Frame(
             self.root,
-            padding=15
+            bg=self.BG
         )
 
-        main_frame.pack(
+        self.main_frame.pack(
             fill="both",
             expand=True
         )
 
-        title = ttk.Label(
-            main_frame,
-            text="HOPPERS",
-            font=("Arial", 24, "bold")
+        # Barra superior
+        top = tk.Frame(
+            self.main_frame,
+            bg=self.BG
         )
 
-        title.grid(
-            row=0,
-            column=0,
-            columnspan=2,
+        top.pack(
+            fill="x",
+            padx=28,
+            pady=(20, 10)
+        )
+
+        tk.Button(
+            top,
+            text="← Menú",
+            command=self.show_start_screen,
+            bg=self.CARD,
+            fg="white",
+            activebackground="#343944",
+            activeforeground="white",
+            relief="flat",
+            font=("Segoe UI", 10),
+            cursor="hand2"
+        ).pack(
+            side="left",
+            ipadx=12,
+            ipady=5
+        )
+
+        tk.Label(
+            top,
+            text="HOPPERS",
+            font=("Segoe UI", 22, "bold"),
+            bg=self.BG,
+            fg="white"
+        ).pack(
+            side="left",
+            padx=20
+        )
+
+        tk.Label(
+            top,
+            text=self.mode,
+            font=("Segoe UI", 10),
+            bg=self.BG,
+            fg=self.MUTED
+        ).pack(
+            side="left"
+        )
+
+        tk.Button(
+            top,
+            text="Cómo jugar",
+            command=self.show_help,
+            bg=self.CARD,
+            fg="white",
+            activebackground="#343944",
+            activeforeground="white",
+            relief="flat",
+            cursor="hand2"
+        ).pack(
+            side="right",
+            padx=(8, 0),
+            ipadx=10,
+            ipady=5
+        )
+
+        tk.Button(
+            top,
+            text="Historial",
+            command=self.show_history,
+            bg=self.CARD,
+            fg="white",
+            activebackground="#343944",
+            activeforeground="white",
+            relief="flat",
+            cursor="hand2"
+        ).pack(
+            side="right",
+            ipadx=10,
+            ipady=5
+        )
+
+
+        # Tarjetas de jugadores
+        player_area = tk.Frame(
+            self.main_frame,
+            bg=self.BG
+        )
+
+        player_area.pack(
+            pady=(5, 10)
+        )
+
+        self.p1_card = tk.Frame(
+            player_area,
+            bg=self.CARD,
+            width=280,
+            height=80
+        )
+
+        self.p1_card.pack(
+            side="left",
+            padx=10
+        )
+
+        self.p1_card.pack_propagate(False)
+
+        self.p1_title = tk.Label(
+            self.p1_card,
+            text="X   JUGADOR 1",
+            font=("Segoe UI", 14, "bold"),
+            bg=self.CARD,
+            fg=self.GREEN
+        )
+
+        self.p1_title.pack(
+            pady=(12, 2)
+        )
+
+        self.p1_info = tk.Label(
+            self.p1_card,
+            text="Meta: esquina inferior derecha ↘",
+            font=("Segoe UI", 9),
+            bg=self.CARD,
+            fg=self.MUTED
+        )
+
+        self.p1_info.pack()
+
+
+        self.p2_card = tk.Frame(
+            player_area,
+            bg=self.CARD,
+            width=280,
+            height=80
+        )
+
+        self.p2_card.pack(
+            side="left",
+            padx=10
+        )
+
+        self.p2_card.pack_propagate(False)
+
+        self.p2_title = tk.Label(
+            self.p2_card,
+            text="O   JUGADOR 2",
+            font=("Segoe UI", 14, "bold"),
+            bg=self.CARD,
+            fg=self.PURPLE
+        )
+
+        self.p2_title.pack(
+            pady=(12, 2)
+        )
+
+        self.p2_info = tk.Label(
+            self.p2_card,
+            text="Meta: esquina superior izquierda ↖",
+            font=("Segoe UI", 9),
+            bg=self.CARD,
+            fg=self.MUTED
+        )
+
+        self.p2_info.pack()
+
+
+        # Texto central de turno
+        self.turn_label = tk.Label(
+            self.main_frame,
+            text="",
+            font=("Segoe UI", 13, "bold"),
+            fg="white",
+            bg=self.BG
+        )
+
+        self.turn_label.pack(
+            pady=(5, 3)
+        )
+
+        self.status_label = tk.Label(
+            self.main_frame,
+            text="",
+            font=("Segoe UI", 9),
+            fg=self.MUTED,
+            bg=self.BG
+        )
+
+        self.status_label.pack(
             pady=(0, 5)
         )
 
-        subtitle = ttk.Label(
-            main_frame,
-            text=(
-                "Selecciona una ficha y después "
-                "haz clic en uno de los espacios disponibles."
-            ),
-            font=("Arial", 11)
+
+        # Tablero
+        board_container = tk.Frame(
+            self.main_frame,
+            bg=self.BOARD_BG,
+            padx=15,
+            pady=15
         )
 
-        subtitle.grid(
-            row=1,
-            column=0,
-            columnspan=2,
-            pady=(0, 15)
+        board_container.pack(
+            pady=10
         )
 
-        board_frame = ttk.Frame(
-            main_frame
-        )
-
-        board_frame.grid(
-            row=2,
-            column=0,
-            sticky="n"
+        canvas_size = (
+            SIZE * self.CELL
+            + self.MARGIN * 2
         )
 
         self.canvas = tk.Canvas(
-            board_frame,
-            width=self.BOARD_PIXELS,
-            height=self.BOARD_PIXELS,
-            background="#f4f4f4",
+            board_container,
+            width=canvas_size,
+            height=canvas_size,
+            bg=self.BOARD_BG,
             highlightthickness=0
         )
 
@@ -151,511 +455,349 @@ class HoppersGUI:
 
         self.canvas.bind(
             "<Button-1>",
-            self.on_board_click
+            self.board_click
         )
 
-        side = ttk.Frame(
-            main_frame,
-            padding=(20, 0)
+
+        # Información inferior
+        bottom = tk.Frame(
+            self.main_frame,
+            bg=self.BG
         )
 
-        side.grid(
-            row=2,
-            column=1,
-            sticky="nsew"
-        )
-
-        main_frame.columnconfigure(
-            1,
-            weight=1
-        )
-
-        self.create_config_panel(side)
-        self.create_turn_panel(side)
-        self.create_selection_panel(side)
-        self.create_help_panel(side)
-        self.create_history_panel(side)
-
-
-    def create_config_panel(self, parent):
-        frame = ttk.LabelFrame(
-            parent,
-            text="Configuración",
-            padding=12
-        )
-
-        frame.pack(
+        bottom.pack(
             fill="x",
-            pady=(0, 12)
+            padx=100,
+            pady=(5, 20)
         )
 
-        ttk.Label(
-            frame,
-            text="Modo de juego:"
-        ).grid(
-            row=0,
-            column=0,
-            sticky="w",
-            pady=5
+        self.selection_label = tk.Label(
+            bottom,
+            text="Selecciona una ficha",
+            font=("Segoe UI", 10),
+            fg="white",
+            bg=self.BG
         )
 
-        mode_box = ttk.Combobox(
-            frame,
-            textvariable=self.mode_var,
-            state="readonly",
-            width=22
+        self.selection_label.pack(
+            side="left"
         )
 
-        mode_box["values"] = (
-            "Humano vs Agente",
-            "Agente vs Humano",
-            "Agente vs Agente",
-            "Humano vs Humano"
+        self.last_move_label = tk.Label(
+            bottom,
+            text="",
+            font=("Segoe UI", 9),
+            fg=self.MUTED,
+            bg=self.BG
         )
 
-        mode_box.grid(
-            row=1,
-            column=0,
-            sticky="ew",
-            pady=(0, 10)
-        )
-
-        ttk.Label(
-            frame,
-            text="Profundidad del agente:"
-        ).grid(
-            row=2,
-            column=0,
-            sticky="w",
-            pady=5
-        )
-
-        depth_box = ttk.Combobox(
-            frame,
-            textvariable=self.depth_var,
-            state="readonly",
-            width=10
-        )
-
-        depth_box["values"] = (
-            1,
-            2,
-            3,
-            4,
-            5
-        )
-
-        depth_box.grid(
-            row=3,
-            column=0,
-            sticky="w",
-            pady=(0, 10)
-        )
-
-        new_button = ttk.Button(
-            frame,
-            text="Nueva partida",
-            command=self.new_game
-        )
-
-        new_button.grid(
-            row=4,
-            column=0,
-            sticky="ew",
-            pady=5
-        )
-
-        frame.columnconfigure(
-            0,
-            weight=1
+        self.last_move_label.pack(
+            side="right"
         )
 
 
-    def create_turn_panel(self, parent):
-        frame = ttk.LabelFrame(
-            parent,
-            text="Turno actual",
-            padding=12
-        )
-
-        frame.pack(
-            fill="x",
-            pady=(0, 12)
-        )
-
-        ttk.Label(
-            frame,
-            textvariable=self.status_var,
-            font=("Arial", 13, "bold"),
-            wraplength=320
-        ).pack(
-            anchor="w"
-        )
-
-        ttk.Label(
-            frame,
-            textvariable=self.objective_var,
-            wraplength=320
-        ).pack(
-            anchor="w",
-            pady=(8, 0)
-        )
 
 
-    def create_selection_panel(self, parent):
-        frame = ttk.LabelFrame(
-            parent,
-            text="Ficha seleccionada",
-            padding=12
-        )
+    def human_turn(self):
+        current = player(self.state)
 
-        frame.pack(
-            fill="x",
-            pady=(0, 12)
-        )
-
-        ttk.Label(
-            frame,
-            textvariable=self.selected_var,
-            wraplength=320
-        ).pack(
-            anchor="w"
-        )
-
-        self.moves_text = tk.Text(
-            frame,
-            height=7,
-            width=38,
-            state="disabled",
-            wrap="word",
-            font=("Consolas", 9)
-        )
-
-        self.moves_text.pack(
-            fill="x",
-            pady=(8, 0)
-        )
-
-
-    def create_help_panel(self, parent):
-        frame = ttk.LabelFrame(
-            parent,
-            text="¿Cómo se juega?",
-            padding=12
-        )
-
-        frame.pack(
-            fill="x",
-            pady=(0, 12)
-        )
-
-        text = (
-            "1. Haz clic en una de tus fichas.\n\n"
-            "2. Los espacios disponibles aparecerán resaltados.\n\n"
-            "3. Haz clic en uno de esos espacios para mover la ficha.\n\n"
-            "4. X (verde) debe llegar a la esquina inferior derecha ↘.\n\n"
-            "5. O (morado) debe llegar a la esquina superior izquierda ↖.\n\n"
-            "6. También puedes realizar saltos sobre otras fichas."
-        )
-
-        ttk.Label(
-            frame,
-            text=text,
-            justify="left",
-            wraplength=320
-        ).pack(
-            anchor="w"
-        )
-
-
-    def create_history_panel(self, parent):
-        frame = ttk.LabelFrame(
-            parent,
-            text="Historial de movimientos",
-            padding=10
-        )
-
-        frame.pack(
-            fill="both",
-            expand=True
-        )
-
-        self.history_text = tk.Text(
-            frame,
-            height=8,
-            width=38,
-            state="disabled",
-            wrap="word",
-            font=("Consolas", 9)
-        )
-
-        self.history_text.pack(
-            fill="both",
-            expand=True
-        )
-
-
-    def new_game(self):
-        self.game_token += 1
-
-        self.state = initial_state()
-
-        self.selected_piece = None
-        self.selected_actions = []
-
-        self.agent_thinking = False
-
-        self.clear_history()
-        self.clear_move_information()
-
-        self.update_interface()
-
-        self.root.after(
-            300,
-            self.check_agent_turn
-        )
-
-
-    def is_human_turn(self):
-        current = player(
-            self.state
-        )
-
-        mode = self.mode_var.get()
-
-        if mode == "Humano vs Humano":
+        if self.mode == "Humano vs Humano":
             return True
 
-        if mode == "Agente vs Agente":
+        if self.mode == "Agente vs Agente":
             return False
 
-        if mode == "Humano vs Agente":
+        if self.mode == "Humano vs Agente":
             return current == P1
 
-        if mode == "Agente vs Humano":
+        if self.mode == "Agente vs Humano":
             return current == P2
 
         return True
 
 
-    def update_interface(self):
+    def update_game(self):
         self.draw_board()
 
         current = player(
             self.state
         )
 
+        normal = self.CARD
+        active = "#343A46"
+
+        if current == P1:
+            self.p1_card.configure(
+                bg=active
+            )
+
+            self.p1_title.configure(
+                bg=active
+            )
+
+            self.p1_info.configure(
+                bg=active
+            )
+
+            self.p2_card.configure(
+                bg=normal
+            )
+
+            self.p2_title.configure(
+                bg=normal
+            )
+
+            self.p2_info.configure(
+                bg=normal
+            )
+
+            name = "Jugador 1 · Verde"
+
+        else:
+            self.p2_card.configure(
+                bg=active
+            )
+
+            self.p2_title.configure(
+                bg=active
+            )
+
+            self.p2_info.configure(
+                bg=active
+            )
+
+            self.p1_card.configure(
+                bg=normal
+            )
+
+            self.p1_title.configure(
+                bg=normal
+            )
+
+            self.p1_info.configure(
+                bg=normal
+            )
+
+            name = "Jugador 2 · Morado"
+
         if self.agent_thinking:
-            self.status_var.set(
-                f"Jugador {current}: "
-                "el agente está pensando..."
+            self.turn_label.config(
+                text=f"{name} está pensando..."
+            )
+
+            self.status_label.config(
+                text="Minimax está calculando el movimiento."
             )
 
         else:
-            symbol = (
-                "X"
-                if current == P1
-                else "O"
-            )
-
             actor = (
                 "Humano"
-                if self.is_human_turn()
+                if self.human_turn()
                 else "Agente"
             )
 
-            self.status_var.set(
-                f"Turno del Jugador {current} "
-                f"({symbol}) - {actor}"
+            self.turn_label.config(
+                text=f"Turno de {name}"
             )
 
-        if current == P1:
-            self.objective_var.set(
-                "X (verde) debe llevar sus fichas "
-                "hacia la esquina inferior derecha ↘"
+            self.status_label.config(
+                text=actor
             )
 
-        else:
-            self.objective_var.set(
-                "O (morado) debe llevar sus fichas "
-                "hacia la esquina superior izquierda ↖"
-            )
+
 
 
     def draw_board(self):
         self.canvas.delete("all")
-
-        margin = self.MARGIN
-        cell = self.CELL_SIZE
-
-        # Números de columnas
-        for col in range(SIZE):
-            x = (
-                margin
-                + col * cell
-                + cell / 2
-            )
-
-            self.canvas.create_text(
-                x,
-                margin / 2,
-                text=str(col),
-                font=("Arial", 10, "bold")
-            )
-
-        # Números de filas
-        for row in range(SIZE):
-            y = (
-                margin
-                + row * cell
-                + cell / 2
-            )
-
-            self.canvas.create_text(
-                margin / 2,
-                y,
-                text=str(row),
-                font=("Arial", 10, "bold")
-            )
 
         destinations = {
             action[-1]
             for action in self.selected_actions
         }
 
+        for i in range(SIZE):
+            x = (
+                self.MARGIN
+                + i * self.CELL
+                + self.CELL / 2
+            )
+
+            y = (
+                self.MARGIN
+                + i * self.CELL
+                + self.CELL / 2
+            )
+
+            self.canvas.create_text(
+                x,
+                self.MARGIN / 2,
+                text=str(i),
+                fill="#777777",
+                font=("Segoe UI", 9, "bold")
+            )
+
+            self.canvas.create_text(
+                self.MARGIN / 2,
+                y,
+                text=str(i),
+                fill="#777777",
+                font=("Segoe UI", 9, "bold")
+            )
+
+
         for row in range(SIZE):
             for col in range(SIZE):
-                x1 = margin + col * cell
-                y1 = margin + row * cell
-
-                x2 = x1 + cell
-                y2 = y1 + cell
-
                 position = (
                     row,
                     col
                 )
 
-                fill = "#ffffff"
+                x1 = (
+                    self.MARGIN
+                    + col * self.CELL
+                )
 
-                # Campamento verde
+                y1 = (
+                    self.MARGIN
+                    + row * self.CELL
+                )
+
+                x2 = x1 + self.CELL
+                y2 = y1 + self.CELL
+
+                if (row + col) % 2 == 0:
+                    color = "#F7F4ED"
+                else:
+                    color = "#E8E4DA"
+
                 if position in CAMP_P1:
-                    fill = "#E5F4E9"
+                    color = "#DDEFE4"
 
-                # Campamento morado
                 elif position in CAMP_P2:
-                    fill = "#EEE5F5"
-
-                # Lugar disponible
-                if position in destinations:
-                    fill = "#CDEBFF"
-
-                # Ficha seleccionada
-                if position == self.selected_piece:
-                    fill = "#FFF1A8"
+                    color = "#EDE1F5"
 
                 self.canvas.create_rectangle(
                     x1,
                     y1,
                     x2,
                     y2,
-                    fill=fill,
-                    outline="#777777",
-                    width=1
+                    fill=color,
+                    outline="#C9C5BC"
                 )
 
-        # Dibujar fichas
+
+        # Destinos posibles
+        for row, col in destinations:
+            x = (
+                self.MARGIN
+                + col * self.CELL
+                + self.CELL / 2
+            )
+
+            y = (
+                self.MARGIN
+                + row * self.CELL
+                + self.CELL / 2
+            )
+
+            self.canvas.create_oval(
+                x - 10,
+                y - 10,
+                x + 10,
+                y + 10,
+                outline=self.BLUE,
+                width=3
+            )
+
+            self.canvas.create_oval(
+                x - 3,
+                y - 3,
+                x + 3,
+                y + 3,
+                fill=self.BLUE,
+                outline=""
+            )
+
+
+        # Fichas
         for row in range(SIZE):
             for col in range(SIZE):
-                value = (
+                piece = (
                     self.state.board[row][col]
                 )
 
-                if value == EMPTY:
+                if piece == EMPTY:
                     continue
 
-                x1 = margin + col * cell + 7
-                y1 = margin + row * cell + 7
-
-                x2 = (
-                    margin
-                    + (col + 1) * cell
-                    - 7
+                x = (
+                    self.MARGIN
+                    + col * self.CELL
+                    + self.CELL / 2
                 )
 
-                y2 = (
-                    margin
-                    + (row + 1) * cell
-                    - 7
+                y = (
+                    self.MARGIN
+                    + row * self.CELL
+                    + self.CELL / 2
                 )
 
-                if value == P1:
-                    color = "#2E8B57"
-                    symbol = "X"
-
+                if piece == P1:
+                    color = self.GREEN
+                    letter = "X"
                 else:
-                    color = "#7B2CBF"
-                    symbol = "O"
+                    color = self.PURPLE
+                    letter = "O"
+
+                if (row, col) == self.selected_piece:
+                    self.canvas.create_oval(
+                        x - 25,
+                        y - 25,
+                        x + 25,
+                        y + 25,
+                        outline=self.GOLD,
+                        width=4
+                    )
 
                 self.canvas.create_oval(
-                    x1,
-                    y1,
-                    x2,
-                    y2,
+                    x - 19,
+                    y - 19,
+                    x + 19,
+                    y + 19,
                     fill=color,
-                    outline="#222222",
+                    outline="#2A2A2A",
                     width=2
                 )
 
                 self.canvas.create_text(
-                    (x1 + x2) / 2,
-                    (y1 + y2) / 2,
-                    text=symbol,
+                    x,
+                    y,
+                    text=letter,
                     fill="white",
-                    font=("Arial", 16, "bold")
+                    font=("Segoe UI", 14, "bold")
                 )
 
-        bottom = (
-            margin
-            + SIZE * cell
-            + 18
-        )
-
-        self.canvas.create_text(
-            margin,
-            bottom,
-            text=(
-                "X = Jugador 1 (verde)     "
-                "O = Jugador 2 (morado)     "
-                "Celeste = movimiento disponible"
-            ),
-            anchor="w",
-            font=("Arial", 9)
-        )
 
 
-    def on_board_click(self, event):
+
+    def board_click(self, event):
         if self.agent_thinking:
             return
 
-        if not self.is_human_turn():
+        if not self.human_turn():
             return
 
-        margin = self.MARGIN
-        cell = self.CELL_SIZE
+        x = event.x - self.MARGIN
+        y = event.y - self.MARGIN
 
-        board_x = event.x - margin
-        board_y = event.y - margin
-
-        if board_x < 0 or board_y < 0:
+        if x < 0 or y < 0:
             return
 
         col = int(
-            board_x // cell
+            x // self.CELL
         )
 
         row = int(
-            board_y // cell
+            y // self.CELL
         )
 
         if not (
@@ -673,33 +815,22 @@ class HoppersGUI:
             self.state
         )
 
-        clicked_value = (
+        clicked = (
             self.state.board[row][col]
         )
 
-        # Si selecciona una ficha propia
-        if clicked_value == current:
-            if position == self.selected_piece:
-                self.selected_piece = None
-                self.selected_actions = []
-
-                self.clear_move_information()
-                self.update_interface()
-
-                return
-
+        if clicked == current:
             self.select_piece(
                 position
             )
 
             return
 
-        # Si selecciona un destino válido
         if self.selected_piece is not None:
             possible = [
-                action
-                for action in self.selected_actions
-                if action[-1] == position
+                move
+                for move in self.selected_actions
+                if move[-1] == position
             ]
 
             if possible:
@@ -707,118 +838,83 @@ class HoppersGUI:
                     possible[0]
                 )
 
-                return
-
-            self.status_var.set(
-                "Ese espacio no es válido. "
-                "Selecciona una casilla celeste."
-            )
+            else:
+                self.selection_label.config(
+                    text="Selecciona uno de los destinos azules."
+                )
 
 
     def select_piece(self, position):
-        legal_actions = actions(
+        if position == self.selected_piece:
+            self.selected_piece = None
+            self.selected_actions = []
+
+            self.selection_label.config(
+                text="Selecciona una ficha"
+            )
+
+            self.update_game()
+            return
+
+        all_moves = actions(
             self.state
         )
 
-        piece_actions = [
-            action
-            for action in legal_actions
-            if action[0] == position
+        piece_moves = [
+            move
+            for move in all_moves
+            if move[0] == position
         ]
 
         self.selected_piece = position
-        self.selected_actions = piece_actions
+        self.selected_actions = piece_moves
 
-        if not piece_actions:
-            self.selected_var.set(
-                f"Ficha {position}: "
-                "no tiene movimientos disponibles."
+        if len(piece_moves) == 0:
+            self.selection_label.config(
+                text=f"La ficha {position} no puede moverse."
             )
-
-            self.clear_moves_text()
 
         else:
-            self.selected_var.set(
-                f"Ficha seleccionada: {position}\n"
-                f"Movimientos disponibles: "
-                f"{len(piece_actions)}"
-            )
-
-            self.show_piece_moves(
-                piece_actions
-            )
-
-        self.update_interface()
-
-
-    def show_piece_moves(self, piece_actions):
-        self.moves_text.configure(
-            state="normal"
-        )
-
-        self.moves_text.delete(
-            "1.0",
-            tk.END
-        )
-
-        for action in piece_actions:
-            destination = action[-1]
-
-            if len(action) == 2:
-                sr, sc = action[0]
-                er, ec = action[-1]
-
-                distance = max(
-                    abs(er - sr),
-                    abs(ec - sc)
+            self.selection_label.config(
+                text=(
+                    f"Ficha {position} · "
+                    f"{len(piece_moves)} movimientos disponibles"
                 )
-
-                if distance == 1:
-                    move_type = "Paso"
-                else:
-                    move_type = "Salto"
-
-            else:
-                move_type = (
-                    f"Salto múltiple "
-                    f"({len(action) - 1} saltos)"
-                )
-
-            self.moves_text.insert(
-                tk.END,
-                f"→ {destination}   "
-                f"{move_type}\n"
             )
 
-        self.moves_text.configure(
-            state="disabled"
-        )
+        self.update_game()
 
 
-    def make_move(self, action):
-        moving_player = player(
+    def make_move(self, move):
+        current_player = player(
             self.state
         )
 
         self.state = result(
             self.state,
-            action
+            move
         )
 
-        self.add_history(
-            moving_player,
-            action,
+        self.save_history(
+            current_player,
+            move,
             "Humano"
         )
 
         self.selected_piece = None
         self.selected_actions = []
 
-        self.clear_move_information()
+        self.last_move_label.config(
+            text=f"Última jugada: {format_action(move)}"
+        )
 
-        self.update_interface()
+        self.selection_label.config(
+            text="Selecciona una ficha"
+        )
 
-        if self.check_game_over():
+        self.update_game()
+
+        if self.check_winner():
             return
 
         self.root.after(
@@ -827,20 +923,21 @@ class HoppersGUI:
         )
 
 
+
+
     def check_agent_turn(self):
-        if self.check_game_over():
+        if self.check_winner():
             return
 
-        if self.is_human_turn():
+        if self.human_turn():
             self.agent_thinking = False
-            self.update_interface()
-
+            self.update_game()
             return
 
-        self.start_agent_turn()
+        self.start_agent()
 
 
-    def start_agent_turn(self):
+    def start_agent(self):
         if self.agent_thinking:
             return
 
@@ -849,85 +946,97 @@ class HoppersGUI:
         self.selected_piece = None
         self.selected_actions = []
 
-        self.clear_move_information()
-        self.update_interface()
+        self.update_game()
 
-        depth = int(
-            self.depth_var.get()
+        agent = MinimaxAgent(
+            depth=self.depth,
+            time_limit=28.0
         )
 
+        old_state = self.state
         current_player = player(
             self.state
         )
 
-        agent = MinimaxAgent(
-            depth=depth,
-            time_limit=28.0
-        )
-
-        state_snapshot = self.state
-        token = self.game_token
+        current_game = self.game_id
 
         thread = threading.Thread(
             target=self.agent_worker,
             args=(
-                state_snapshot,
+                current_game,
+                old_state,
                 current_player,
-                agent,
-                token
+                agent
             ),
             daemon=True
         )
 
         thread.start()
 
+        self.root.after(
+            100,
+            self.check_agent_result
+        )
+
 
     def agent_worker(
         self,
-        state_snapshot,
+        game_id,
+        old_state,
         current_player,
-        agent,
-        token
+        agent
     ):
-        start_time = (
-            time.perf_counter()
-        )
+        start = time.perf_counter()
 
-        action = agent.choose_action(
-            state_snapshot
+        move = agent.choose_action(
+            old_state
         )
 
         elapsed = (
             time.perf_counter()
-            - start_time
+            - start
         )
 
-        nodes = agent.nodes
-
-        self.root.after(
-            0,
-            lambda: self.finish_agent_move(
-                state_snapshot,
+        self.agent_queue.put(
+            (
+                game_id,
+                old_state,
                 current_player,
-                action,
+                move,
                 elapsed,
-                nodes,
-                token
+                agent.nodes
             )
         )
 
 
-    def finish_agent_move(
-        self,
-        old_state,
-        moving_player,
-        action,
-        elapsed,
-        nodes,
-        token
-    ):
-        # Evita usar una respuesta de una partida anterior
-        if token != self.game_token:
+    def check_agent_result(self):
+        data = None
+
+        while not self.agent_queue.empty():
+            item = self.agent_queue.get()
+
+            if item[0] == self.game_id:
+                data = item
+
+        if data is None:
+            if self.agent_thinking:
+                self.root.after(
+                    100,
+                    self.check_agent_result
+                )
+
+            return
+
+        (
+            game_id,
+            old_state,
+            current_player,
+            move,
+            elapsed,
+            nodes
+        ) = data
+
+        if game_id != self.game_id:
             return
 
         if old_state != self.state:
@@ -935,30 +1044,32 @@ class HoppersGUI:
 
         self.agent_thinking = False
 
-        if action is None:
-            self.update_interface()
-            self.check_game_over()
-
+        if move is None:
+            self.check_winner()
             return
 
         self.state = result(
             self.state,
-            action
+            move
         )
 
-        self.add_history(
-            moving_player,
-            action,
-            (
-                f"Agente | "
-                f"{elapsed:.2f}s | "
-                f"{nodes} nodos"
-            )
+        description = (
+            f"Agente · {elapsed:.2f}s · {nodes} nodos"
         )
 
-        self.update_interface()
+        self.save_history(
+            current_player,
+            move,
+            description
+        )
 
-        if self.check_game_over():
+        self.last_move_label.config(
+            text=f"Última jugada: {format_action(move)}"
+        )
+
+        self.update_game()
+
+        if self.check_winner():
             return
 
         self.root.after(
@@ -967,11 +1078,12 @@ class HoppersGUI:
         )
 
 
-    def add_history(
+
+    def save_history(
         self,
         player_id,
-        action,
-        actor
+        move,
+        description
     ):
         symbol = (
             "X"
@@ -979,72 +1091,107 @@ class HoppersGUI:
             else "O"
         )
 
-        route = format_action(
-            action
+        self.history.append(
+            (
+                symbol,
+                description,
+                format_action(move)
+            )
         )
 
-        text = (
-            f"{symbol} | {actor}\n"
-            f"{route}\n\n"
+
+    def show_history(self):
+        window = tk.Toplevel(
+            self.root
         )
 
-        self.history_text.configure(
-            state="normal"
+        window.title(
+            "Historial de movimientos"
         )
 
-        self.history_text.insert(
-            tk.END,
-            text
+        window.geometry(
+            "520x500"
         )
 
-        self.history_text.see(
-            tk.END
+        window.configure(
+            bg=self.BG
         )
 
-        self.history_text.configure(
+        tk.Label(
+            window,
+            text="Historial de la partida",
+            font=("Segoe UI", 18, "bold"),
+            bg=self.BG,
+            fg="white"
+        ).pack(
+            pady=(20, 10)
+        )
+
+        text = tk.Text(
+            window,
+            bg=self.CARD,
+            fg="white",
+            relief="flat",
+            font=("Consolas", 10),
+            padx=15,
+            pady=15
+        )
+
+        text.pack(
+            fill="both",
+            expand=True,
+            padx=20,
+            pady=(0, 20)
+        )
+
+        if not self.history:
+            text.insert(
+                tk.END,
+                "Todavía no se han realizado movimientos."
+            )
+
+        else:
+            for number, item in enumerate(
+                self.history,
+                start=1
+            ):
+                symbol, description, move = item
+
+                text.insert(
+                    tk.END,
+                    f"{number}. {symbol} - {description}\n"
+                    f"   {move}\n\n"
+                )
+
+        text.config(
             state="disabled"
         )
 
 
-    def clear_history(self):
-        self.history_text.configure(
-            state="normal"
-        )
-
-        self.history_text.delete(
-            "1.0",
-            tk.END
-        )
-
-        self.history_text.configure(
-            state="disabled"
-        )
 
 
-    def clear_move_information(self):
-        self.selected_var.set(
-            "Ninguna ficha seleccionada"
-        )
-
-        self.clear_moves_text()
-
-
-    def clear_moves_text(self):
-        self.moves_text.configure(
-            state="normal"
-        )
-
-        self.moves_text.delete(
-            "1.0",
-            tk.END
-        )
-
-        self.moves_text.configure(
-            state="disabled"
+    def show_help(self):
+        messagebox.showinfo(
+            "Cómo jugar Hoppers",
+            (
+                "OBJETIVO\n\n"
+                "El jugador verde (X) debe llegar a la esquina "
+                "inferior derecha.\n\n"
+                "El jugador morado (O) debe llegar a la esquina "
+                "superior izquierda.\n\n"
+                "MOVIMIENTOS\n\n"
+                "Haz clic sobre una de tus fichas. "
+                "Los círculos azules indican los lugares disponibles.\n\n"
+                "Las fichas pueden moverse una casilla en cualquiera "
+                "de las ocho direcciones.\n\n"
+                "También pueden saltar sobre otras fichas y realizar "
+                "varios saltos en un mismo turno."
+            )
         )
 
 
-    def check_game_over(self):
+
+    def check_winner(self):
         game_winner = winner(
             self.state
         )
@@ -1053,25 +1200,15 @@ class HoppersGUI:
             return False
 
         self.agent_thinking = False
-        self.update_interface()
 
-        symbol = (
-            "X"
-            if game_winner == P1
-            else "O"
-        )
-
-        self.status_var.set(
-            f"¡Ganó el Jugador "
-            f"{game_winner} ({symbol})!"
-        )
+        if game_winner == P1:
+            name = "Jugador 1 · Verde"
+        else:
+            name = "Jugador 2 · Morado"
 
         messagebox.showinfo(
             "Fin de la partida",
-            (
-                f"¡Ganó el Jugador "
-                f"{game_winner} ({symbol})!"
-            )
+            f"¡Ganó {name}!"
         )
 
         return True
@@ -1080,7 +1217,7 @@ class HoppersGUI:
 def main():
     root = tk.Tk()
 
-    HoppersGUI(
+    HoppersApp(
         root
     )
 
